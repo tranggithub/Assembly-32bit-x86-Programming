@@ -487,10 +487,6 @@ section .text
 
 _start:
 InputOutput:
-    ; Read file path from command-line argument
-    ;mov rbx, [rsp + 4]    ; argv[1]
-    ;test rbx, rbx         ; Check if argv[1] is NULL
-    ;jz exit_invalid_input ; If NULL, exit
     ; In prompt yêu cầu nhập đường dẫn
     mov rax, 4              ; syscall write
     mov rbx, 1              ; stdout
