@@ -1585,7 +1585,7 @@ print_import_funct:
 
     mov eax, dword [impfunc_hint]
     push eax
-    push 6
+    push 2
     call printxb
     pop ebx
     pop ebx
