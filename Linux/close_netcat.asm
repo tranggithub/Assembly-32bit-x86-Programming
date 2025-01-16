@@ -1,3 +1,8 @@
+;    nasm -felf64 close_netcat.asm && gcc -no-pie close_netcat.o && ./a.out
+;
+    extern strstr
+    extern printf
+    extern atoi
 section .data
     path db "/proc", 0                 ; Đường dẫn thư mục
     buf  times 10240 db 0               ; Bộ đệm để đọc nội dung thư mục
@@ -6,6 +11,14 @@ section .data
     cmd_path times 50 db 0		; duong dan den /proc/<pid>/cmd
     cmd_buf  times 256 db 0               ; Bộ đệm để đọc nội dung cmdline
     nc db "nc", 0
+    found_tx db "Found",10
+    
+    msg db "Loop after 10s...", 0xA, 0 ; Thông báo cho mỗi vòng lặp
+    msg_len equ $ - msg                       ; Độ dài của thông báo
+
+    delay_time:
+    		dq 10                       ; 10 giây (giây)
+    		dq 0                        ; 0 nano giây
 
 section .bss
     fd resq 1                          ; File descriptor của thư mục
@@ -16,8 +29,36 @@ section .bss
 
 section .text
     global main
-
 main:
+.loop:
+    
+    call scan_and_kill_nc
+    
+    ; Chờ 10 giây
+    mov rax, 35                 ; syscall: nanosleep
+    lea rdi, [rel delay_time]   ; Cấu trúc chỉ định thời gian chờ
+    xor rsi, rsi                ; Null pointer (không cần xử lý lỗi)
+    syscall                     ; Gọi hệ thống
+    
+    ; Ghi thông báo ra màn hình
+    mov rax, 1                  ; syscall: write
+    mov rdi, 1                  ; file descriptor: stdout
+    mov rsi, msg            ; Địa chỉ thông báo
+    mov rdx, msg_len        ; Độ dài thông báo
+    syscall                     ; Gọi hệ thống
+
+    ; Quay lại vòng lặp
+    jmp .loop
+    
+    ; Thoát chương trình
+    mov rax, 60                       ; syscall: exit
+    xor rdi, rdi                      ; Exit code 0
+    syscall
+
+scan_and_kill_nc:
+    push rbp
+    mov rbp, rsp
+    
     ; Mở thư mục bằng syscall openat
     mov rax, 257                      ; syscall: openat
     mov rdi, -100                     ; AT_FDCWD
@@ -76,6 +117,13 @@ next_entry:
     cmp cl, 0x39
     jg skip_pid
     
+    ; Xuống dòng
+    mov rax, 1                        ; syscall: write
+    mov rdi, 1                        ; stdout
+    lea rsi, [rel newline]            ; In newline
+    mov rdx, 1
+    syscall 
+    
     call cal_cmd_path
     ; cmd
     mov rax, 1                        ; syscall: write
@@ -116,20 +164,28 @@ close_fd:
     syscall                           ; Thực thi syscall
 
 exit:
-    ; Thoát chương trình
-    mov rax, 60                       ; syscall: exit
-    xor rdi, rdi                      ; Exit code 0
-    syscall
+    pop rbp
+    ret
+
 
 cal_cmd_path: 
     push rbp
     mov rbp, rsp
     
-    push qword [cmd_addr]
-    push qword [len]
-    call StringToDec
-    pop rbx
-    pop rbx
+    ;push cmd_addr
+    ;push qword [len]
+    ;call little_to_big_endian
+    ;pop rbx
+    ;pop rbx
+    
+    ;push rax
+    ;push qword [len]
+    ;call StringToDec
+    ;pop rbx
+    ;pop rbx
+    
+    mov rdi, qword [cmd_addr]
+    call atoi
     
     mov qword [pid], rax
    
@@ -140,8 +196,7 @@ cal_cmd_path:
     mov byte [cmd_path + 4], 0x63	; c
     mov byte [cmd_path + 5], 0x2f	; /
     
-    xor rsi, rsi
-    
+    xor rsi, rsi  
 pid_loop:    
     cmp rsi, qword [len]
     je pid_loop_exit
@@ -154,6 +209,10 @@ pid_loop:
     mov bl, byte [rcx]	
     mov byte [cmd_path + rax], bl
     
+    mov bl, byte [rcx - 1]
+    cmp bl, 0
+    je pid_loop_exit
+        
     inc rsi
     jmp pid_loop
 pid_loop_exit:
@@ -201,6 +260,33 @@ stringtodec_exit:
 .done:
     pop rbp
     ret
+
+little_to_big_endian:
+    push rbp
+    mov rbp, rsp
+
+    ;dia chi cua chuoi
+    mov rbx, [rbp + 24]
+    ;kich thuoc muon chuyen sang little endian
+    mov rsi, [rbp + 16]
+    dec rsi             
+    xor rax, rax
+
+little_to_big_endian_loop:
+    
+    cmp rsi, 0
+    jl little_to_big_endian_exit
+
+    shl rax, 8
+    mov al, byte [rbx + rsi]
+
+    dec rsi
+    jmp little_to_big_endian_loop
+
+little_to_big_endian_exit:
+    pop rbp
+    ret
+
     
 check_nc:
     push rbp
@@ -222,13 +308,29 @@ check_nc:
     syscall
     test rax, rax
     jle close_file              ; Nếu không đọc được, đóng file
-int3    
-    ;mov rdi, [rel cmd_buf]
-    ;lea rsi, [rel nc]         ; rsi = "nc"
-    ;call strstr
-    ;test rax, rax
-    ;jz not_found
+            
+    lea rdi, [rel cmd_buf]
+    lea rsi, [rel nc]         ; rsi = "nc"
+    call strstr
+    test rax, rax
+    jz not_found
 found:
+    ; Xuống dòng
+    mov rax, 1                        ; syscall: write
+    mov rdi, 1                        ; stdout
+    lea rsi, [rel newline]            ; In newline
+    mov rdx, 1
+    syscall 
+
+    ;In danh dau tim thay
+    mov rax, 1                        ; syscall: write
+    mov rdi, 1                        ; stdout
+    lea rsi, [rel found_tx]           ; In chuỗi "Found"
+    mov rdx, 6
+    syscall                           ; Thực thi syscall
+    
+    call kill_pid
+    
     mov rax, 1
     jmp check_done
 not_found:
@@ -241,6 +343,20 @@ close_file:
     pop rdi
     mov rax, 3                  ; syscall close
     mov rdi, rdi                ; File descriptor
+    syscall
+    
+    pop rbp
+    ret
+
+kill_pid:
+    push rbp
+    mov rbp, rsp
+    
+    ; Gửi tín hiệu SIGKILL (9) đến tiến trình
+    mov rdi, qword [pid]
+   
+    mov rax, 62                               ; syscall: kill
+    mov rsi, 9                                ; SIGKILL
     syscall
     
     pop rbp
