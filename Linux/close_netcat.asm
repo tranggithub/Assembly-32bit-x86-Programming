@@ -1,5 +1,3 @@
-;    nasm -felf64 close_netcat.asm && gcc -no-pie close_netcat.o && ./a.out
-;
     extern strstr
     extern printf
     extern atoi
